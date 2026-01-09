@@ -3,8 +3,10 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Heart, Wind, Droplets, Activity, Zap, LogOut, ArrowLeft, TrendingDown, TrendingUp, Minus, BarChart3 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { useUserAssessments } from "@/hooks/use-user-data";
 
 interface DiseaseAnswers {
   [key: string]: string[];
@@ -85,6 +87,8 @@ const diseases = {
 
 export default function SimulatorPage() {
   const router = useRouter();
+  const { user, logout } = useAuth();
+  const { assessments, isLoading: assessmentsLoading } = useUserAssessments();
   const [username, setUsername] = useState("");
   const [answers, setAnswers] = useState<DiseaseAnswers>({
     heart: ["", "", "", "", ""],
@@ -115,29 +119,35 @@ export default function SimulatorPage() {
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
 
   useEffect(() => {
-    const storedUsername = localStorage.getItem("username");
-    if (storedUsername) {
-      setUsername(storedUsername);
+    if (user?.name) {
+      setUsername(user.name);
     }
-    
-    // Load current risks from localStorage (from Overview page)
-    const savedRisks = localStorage.getItem("diseaseRisks");
-    if (savedRisks) {
-      const parsedRisks = JSON.parse(savedRisks);
-      setCurrentRisks({
-        heart: parsedRisks.heart || 0,
-        lung: parsedRisks.lung || 0,
-        diabetes: parsedRisks.diabetes || 0,
-        pcod: parsedRisks.pcod || 0,
-        thyroid: parsedRisks.thyroid || 0,
+  }, [user]);
+
+  useEffect(() => {
+    if (!assessmentsLoading && assessments.length > 0) {
+      const risks = {
+        heart: 0,
+        lung: 0,
+        diabetes: 0,
+        pcod: 0,
+        thyroid: 0,
+      };
+
+      // Get the latest assessment for each disease type
+      assessments.forEach(a => {
+        const type = a.disease_type.toLowerCase() as keyof typeof risks;
+        if (risks[type] === 0) { // Only take the latest one (since sorted by created_at desc)
+          risks[type] = a.risk_score;
+        }
       });
+
+      setCurrentRisks(risks);
     }
-  }, []);
+  }, [assessments, assessmentsLoading]);
 
   const handleLogout = () => {
-    localStorage.removeItem("username");
-    localStorage.removeItem("userEmail");
-    router.push("/login");
+    logout();
   };
 
   const handleAnswerChange = (diseaseKey: string, questionIndex: number, value: string) => {

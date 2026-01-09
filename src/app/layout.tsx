@@ -4,6 +4,7 @@ import VisualEditsMessenger from "../visual-edits/VisualEditsMessenger";
 import ErrorReporter from "@/components/ErrorReporter";
 import Script from "next/script";
 import { AuthProvider } from "@/context/AuthContext";
+import { CommandProvider } from "@/context/CommandContext";
 import { AuthenticatedLayout } from "@/components/AuthenticatedLayout";
 
 export const metadata: Metadata = {
@@ -37,7 +38,9 @@ export default function RootLayout({
           data-custom-data='{"appName": "YourApp", "version": "1.0.0", "greeting": "hi"}'
         />
         <AuthProvider>
-          <AuthenticatedLayout>{children}</AuthenticatedLayout>
+          <CommandProvider>
+            <AuthenticatedLayout>{children}</AuthenticatedLayout>
+          </CommandProvider>
         </AuthProvider>
         <VisualEditsMessenger />
       </body>

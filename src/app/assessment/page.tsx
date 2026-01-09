@@ -13,6 +13,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 
 interface Disease {
   id: string;
@@ -372,7 +373,7 @@ function PillSelector({
 
 export default function AssessmentPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const { user, logout } = useAuth();
   const [selectedDisease, setSelectedDisease] = useState<Disease | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(-1); // -1 means disease selection
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -383,19 +384,12 @@ export default function AssessmentPage() {
   const [direction, setDirection] = useState(0);
 
   const handleLogout = () => {
-    localStorage.removeItem("username");
-    localStorage.removeItem("userEmail");
-    router.push("/login");
+    logout();
   };
 
   // Check URL parameters and auto-select disease if provided
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storedUsername = localStorage.getItem("username");
-      if (storedUsername) {
-        setUsername(storedUsername);
-      }
-      
       const params = new URLSearchParams(window.location.search);
       const diseaseParam = params.get('disease');
       if (diseaseParam) {
@@ -440,12 +434,34 @@ export default function AssessmentPage() {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setIsSubmitting(true);
-    const riskScore = Math.floor(Math.random() * 40) + 20;
-    setTimeout(() => {
-      router.push(`/results?score=${riskScore}&disease=${data.disease}`);
-    }, 1500);
+    try {
+      const response = await fetch('/api/assessment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          diseaseType: data.disease,
+          answers: data.answers,
+          userId: user?.id, // Include user ID for saving to database
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        localStorage.setItem('lastAssessment', JSON.stringify(result));
+        router.push(`/results?score=${result.riskScore}&disease=${data.disease}&level=${result.riskLevel}`);
+      } else {
+        console.error('Assessment failed:', result.error);
+        const fallbackScore = Math.floor(Math.random() * 40) + 20;
+        router.push(`/results?score=${fallbackScore}&disease=${data.disease}`);
+      }
+    } catch (error) {
+      console.error('Assessment error:', error);
+      const fallbackScore = Math.floor(Math.random() * 40) + 20;
+      router.push(`/results?score=${fallbackScore}&disease=${data.disease}`);
+    }
   };
 
   const slideVariants = {
@@ -580,9 +596,9 @@ export default function AssessmentPage() {
               <p className="text-xs text-slate-500 uppercase tracking-widest">Disease Risk Evaluation</p>
             </div>
             <div className="flex items-center gap-4">
-              {username && (
+              {user?.name && (
                 <span className="text-sm text-slate-400">
-                  Welcome, <span className="text-cyan-400 font-medium">{username}</span>
+                  Welcome, <span className="text-cyan-400 font-medium">{user.name}</span>
                 </span>
               )}
               <button

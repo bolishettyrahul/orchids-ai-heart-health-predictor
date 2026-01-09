@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { PerformanceAwareMotion } from "@/components/performance";
 import {
@@ -9,7 +9,6 @@ import {
   X,
   Bot,
   User,
-  Sparkles,
   Moon,
   Utensils,
   Activity,
@@ -23,8 +22,6 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  timestamp: Date;
-  suggestions?: string[];
 }
 
 interface WeeklyPlan {
@@ -35,35 +32,6 @@ interface WeeklyPlan {
   mindfulness: string;
 }
 
-// AI Coach response templates
-const coachResponses: Record<string, { response: string; suggestions: string[] }> = {
-  sleep: {
-    response: "I understand sleep can be challenging. Here are some evidence-based tips:\n\n🌙 **Sleep Hygiene Improvements:**\n• Avoid screens 60 minutes before bed\n• Keep your bedroom cool (65-68°F)\n• Try a consistent wake time, even weekends\n• Limit caffeine after 2 PM\n\nWould you like me to create a personalized sleep improvement plan?",
-    suggestions: ["Create sleep plan", "More sleep tips", "Track my sleep"],
-  },
-  sugar: {
-    response: "Reducing sugar intake is one of the most impactful changes you can make! Here's a gradual approach:\n\n🍭 **Sugar Reduction Strategy:**\n• Week 1-2: Replace sugary drinks with water\n• Week 3-4: Swap desserts for fruit\n• Week 5-6: Check labels for hidden sugars\n\nYour diabetes risk could drop by **12-15%** with consistent effort!",
-    suggestions: ["Low-sugar meal ideas", "Sugar alternatives", "Weekly meal plan"],
-  },
-  exercise: {
-    response: "Great question! Starting small is key to sustainable fitness:\n\n🏃 **Beginner Activity Plan:**\n• Start with 10-minute walks after meals\n• Add 5 minutes each week\n• Include strength training 2x/week\n• Find activities you enjoy!\n\nEven 30 minutes of moderate activity reduces heart disease risk by **20%**.",
-    suggestions: ["Home workouts", "Walking plan", "Track activity"],
-  },
-  stress: {
-    response: "Stress management is crucial for heart and thyroid health. Try these techniques:\n\n🧘 **Stress Reduction Tools:**\n• 4-7-8 breathing: Inhale 4s, hold 7s, exhale 8s\n• 5-minute morning meditation\n• Progressive muscle relaxation before bed\n• Nature walks when possible\n\nReducing stress can lower your overall health risk by **8-12%**!",
-    suggestions: ["Breathing exercise", "Meditation guide", "Stress tracker"],
-  },
-  snacking: {
-    response: "Night snacking is common! Here's how to manage it healthily:\n\n🥜 **Smart Snacking Strategy:**\n• Choose protein-rich snacks (Greek yogurt, nuts)\n• Aim for an 8-hour eating window\n• Keep healthy snacks visible, hide tempting ones\n• Drink water first - sometimes we're just thirsty!\n\nThis simple change can improve your metabolic health significantly.",
-    suggestions: ["Healthy snack list", "Meal timing plan", "Appetite tips"],
-  },
-  default: {
-    response: "I'm here to help you optimize your health! I can provide personalized advice on:\n\n• 😴 Sleep improvement\n• 🍎 Nutrition & diet\n• 🏃 Physical activity\n• 🧘 Stress management\n• 💊 Habit building\n\nWhat area would you like to focus on today?",
-    suggestions: ["Improve sleep", "Reduce sugar", "Start exercising", "Manage stress"],
-  },
-};
-
-// Weekly plan generator
 function generateWeeklyPlan(): WeeklyPlan[] {
   return [
     { day: "Monday", sleep: "7.5 hrs target", diet: "Reduce sugar 20%", activity: "5000 steps", mindfulness: "5 min breathing" },
@@ -76,30 +44,25 @@ function generateWeeklyPlan(): WeeklyPlan[] {
   ];
 }
 
-function detectIntent(message: string): string {
-  const lower = message.toLowerCase();
-  if (lower.includes("sleep") || lower.includes("tired") || lower.includes("insomnia") || lower.includes("rest")) return "sleep";
-  if (lower.includes("sugar") || lower.includes("sweet") || lower.includes("dessert") || lower.includes("carb")) return "sugar";
-  if (lower.includes("exercise") || lower.includes("workout") || lower.includes("active") || lower.includes("gym") || lower.includes("walk")) return "exercise";
-  if (lower.includes("stress") || lower.includes("anxious") || lower.includes("worried") || lower.includes("overwhelm")) return "stress";
-  if (lower.includes("snack") || lower.includes("night") || lower.includes("hungry") || lower.includes("craving")) return "snacking";
-  return "default";
-}
+const quickSuggestions = [
+  "How can I improve my sleep quality?",
+  "What foods should I avoid for heart health?",
+  "Give me a beginner exercise plan",
+  "How do I manage stress better?",
+];
 
 export function HealthCoachChat() {
   const [isOpen, setIsOpen] = useState(false);
+  const [showWeeklyPlan, setShowWeeklyPlan] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: "1",
+      id: "welcome",
       role: "assistant",
-      content: "👋 Hi! I'm your AI Health Coach. I can help you with personalized advice on sleep, nutrition, exercise, and stress management.\n\nBased on your profile, I notice some areas we could work on together. What would you like to focus on?",
-      timestamp: new Date(),
-      suggestions: ["Improve my sleep", "Reduce sugar intake", "Start exercising", "Manage stress better"],
+      content: "👋 Hi! I'm your AI Health Coach powered by advanced AI. I can help you with personalized advice on sleep, nutrition, exercise, and stress management.\n\nBased on your profile, I can provide tailored recommendations for heart health, diabetes prevention, lung health, thyroid management, and PCOD/PCOS support.\n\nWhat would you like to focus on today?",
     },
   ]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [showWeeklyPlan, setShowWeeklyPlan] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -110,44 +73,101 @@ export function HealthCoachChat() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async (text?: string) => {
-    const messageText = text || input;
-    if (!messageText.trim()) return;
+  const sendMessage = useCallback(async (content: string) => {
+    if (!content.trim() || isLoading) return;
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `user-${Date.now()}`,
       role: "user",
-      content: messageText,
-      timestamp: new Date(),
+      content: content.trim(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
-    setIsTyping(true);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    setIsLoading(true);
 
-    // Simulate AI thinking
-    await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 1000));
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: updatedMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        }),
+      });
 
-    const intent = detectIntent(messageText);
-    const response = coachResponses[intent] || coachResponses.default;
+      if (!response.ok) {
+        throw new Error("Failed to get response");
+      }
 
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "assistant",
-      content: response.response,
-      timestamp: new Date(),
-      suggestions: response.suggestions,
-    };
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
 
-    setMessages((prev) => [...prev, assistantMessage]);
-    setIsTyping(false);
+      if (!reader) {
+        throw new Error("No reader available");
+      }
+
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: "",
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        // Plain text stream - just append directly
+        fullContent += chunk;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMessage.id ? { ...m, content: fullContent } : m
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Chat error:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: "Sorry, I encountered an error. Please try again.",
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [messages, isLoading]);
+
+  const handleQuickSend = (text: string) => {
+    sendMessage(text);
   };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+  };
+
+  const onFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputValue.trim() || isLoading) return;
+    const message = inputValue;
+    setInputValue("");
+    sendMessage(message);
+  };
+
 
   const weeklyPlan = generateWeeklyPlan();
 
   return (
     <>
-      {/* Chat Toggle Button */}
       <button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-full shadow-lg shadow-cyan-500/25 flex items-center justify-center text-white z-50 hover:scale-105 active:scale-95 transition-transform"
@@ -155,7 +175,6 @@ export function HealthCoachChat() {
         <MessageCircle className="w-6 h-6" />
       </button>
 
-      {/* Chat Panel */}
       <AnimatePresence>
         {isOpen && (
           <PerformanceAwareMotion
@@ -164,7 +183,6 @@ export function HealthCoachChat() {
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             className="fixed bottom-6 right-6 w-[420px] h-[600px] bg-[#0a0f1a] border border-cyan-500/20 rounded-2xl shadow-2xl shadow-black/50 flex flex-col z-50 overflow-hidden"
           >
-            {/* Header */}
             <div className="bg-gradient-to-r from-cyan-500/10 to-teal-500/10 border-b border-white/5 p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-r from-cyan-500 to-teal-500 flex items-center justify-center">
@@ -174,7 +192,7 @@ export function HealthCoachChat() {
                   <h3 className="text-white font-bold text-sm">AI Health Coach</h3>
                   <p className="text-cyan-400 text-xs flex items-center gap-1">
                     <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    Online
+                    Powered by GPT-4
                   </p>
                 </div>
               </div>
@@ -195,7 +213,6 @@ export function HealthCoachChat() {
               </div>
             </div>
 
-            {/* Weekly Plan Panel */}
             <AnimatePresence>
               {showWeeklyPlan && (
                 <PerformanceAwareMotion
@@ -228,7 +245,6 @@ export function HealthCoachChat() {
               )}
             </AnimatePresence>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {messages.map((message) => (
                 <PerformanceAwareMotion
@@ -251,16 +267,15 @@ export function HealthCoachChat() {
                   >
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                     
-                    {/* Suggestions */}
-                    {message.suggestions && message.suggestions.length > 0 && (
+                    {message.role === "assistant" && message.id === "welcome" && (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {message.suggestions.map((suggestion) => (
+                        {quickSuggestions.slice(0, 2).map((suggestion) => (
                           <button
                             key={suggestion}
-                            onClick={() => handleSend(suggestion)}
+                            onClick={() => handleQuickSend(suggestion)}
                             className="px-3 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs rounded-full border border-cyan-500/20 transition-colors flex items-center gap-1"
                           >
-                            {suggestion}
+                            {suggestion.slice(0, 25)}...
                             <ChevronRight className="w-3 h-3" />
                           </button>
                         ))}
@@ -275,8 +290,7 @@ export function HealthCoachChat() {
                 </PerformanceAwareMotion>
               ))}
 
-              {/* Typing indicator */}
-              {isTyping && (
+              {isLoading && (
                 <PerformanceAwareMotion
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -297,7 +311,6 @@ export function HealthCoachChat() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Quick Actions */}
             <div className="px-4 py-2 border-t border-white/5 flex gap-2 overflow-x-auto">
               {[
                 { icon: Moon, label: "Sleep", color: "text-purple-400" },
@@ -307,7 +320,7 @@ export function HealthCoachChat() {
               ].map((action) => (
                 <button
                   key={action.label}
-                  onClick={() => handleSend(`Help me with ${action.label.toLowerCase()}`)}
+                  onClick={() => handleQuickSend(`Help me with ${action.label.toLowerCase()}`)}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-full text-xs text-slate-400 hover:text-white transition-colors whitespace-nowrap"
                 >
                   <action.icon className={`w-3 h-3 ${action.color}`} />
@@ -316,30 +329,28 @@ export function HealthCoachChat() {
               ))}
             </div>
 
-            {/* Input */}
-            <div className="p-4 border-t border-white/5">
+            <form id="chat-form" onSubmit={onFormSubmit} className="p-4 border-t border-white/5">
               <div className="flex gap-2">
                 <input
                   type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                  value={inputValue}
+                  onChange={handleInputChange}
                   placeholder="Ask your health coach..."
                   className="flex-1 bg-slate-800/50 border border-white/5 rounded-xl px-4 py-3 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/30"
                 />
                 <button
-                  onClick={() => handleSend()}
-                  disabled={!input.trim() || isTyping}
+                  type="submit"
+                  disabled={!inputValue?.trim() || isLoading}
                   className="w-12 h-12 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-xl flex items-center justify-center text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-cyan-500/25 transition-all"
                 >
-                  {isTyping ? (
+                  {isLoading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     <Send className="w-5 h-5" />
                   )}
                 </button>
               </div>
-            </div>
+            </form>
           </PerformanceAwareMotion>
         )}
       </AnimatePresence>

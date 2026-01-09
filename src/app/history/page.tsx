@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Calendar,
   LogOut,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -32,42 +33,8 @@ import {
 } from "recharts";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { VirtualizedList } from "@/components/performance";
-
-const riskHistoryData = [
-  { date: "Jan 15", risk: 48 },
-  { date: "Feb 12", risk: 45 },
-  { date: "Mar 18", risk: 42 },
-  { date: "Apr 22", risk: 38 },
-  { date: "May 10", risk: 36 },
-  { date: "Jun 15", risk: 33 },
-];
-
-const cholesterolHistoryData = [
-  { date: "Jan 15", value: 230 },
-  { date: "Feb 12", value: 225 },
-  { date: "Mar 18", value: 218 },
-  { date: "Apr 22", value: 210 },
-  { date: "May 10", value: 205 },
-  { date: "Jun 15", value: 198 },
-];
-
-const bpHistoryData = [
-  { date: "Jan 15", systolic: 128, diastolic: 84 },
-  { date: "Feb 12", systolic: 125, diastolic: 82 },
-  { date: "Mar 18", systolic: 122, diastolic: 80 },
-  { date: "Apr 22", systolic: 120, diastolic: 78 },
-  { date: "May 10", systolic: 118, diastolic: 76 },
-  { date: "Jun 15", systolic: 118, diastolic: 76 },
-];
-
-const assessments = [
-  { id: 1, date: "June 15, 2024", riskScore: 33, status: "low", cholesterol: 198, bp: "118/76" },
-  { id: 2, date: "May 10, 2024", riskScore: 36, status: "moderate", cholesterol: 205, bp: "118/76" },
-  { id: 3, date: "April 22, 2024", riskScore: 38, status: "moderate", cholesterol: 210, bp: "120/78" },
-  { id: 4, date: "March 18, 2024", riskScore: 42, status: "moderate", cholesterol: 218, bp: "122/80" },
-  { id: 5, date: "February 12, 2024", riskScore: 45, status: "moderate", cholesterol: 225, bp: "125/82" },
-  { id: 6, date: "January 15, 2024", riskScore: 48, status: "moderate", cholesterol: 230, bp: "128/84" },
-];
+import { useAuth } from "@/context/AuthContext";
+import { useUserAssessments, useHealthMetrics } from "@/hooks/use-user-data";
 
 const sidebarItems = [
   { icon: List, label: "Overview", href: "/" },
@@ -147,19 +114,51 @@ function DataPanel({
 
 export default function HistoryPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const { user, logout } = useAuth();
+  const { assessments: userAssessments, isLoading } = useUserAssessments();
+  const { metrics: cholesterolMetrics } = useHealthMetrics("cholesterol");
+  const { metrics: systolicMetrics } = useHealthMetrics("blood_pressure_systolic");
+  const { metrics: diastolicMetrics } = useHealthMetrics("blood_pressure_diastolic");
 
-  useEffect(() => {
-    const storedUsername = localStorage.getItem("username");
-    if (storedUsername) {
-      setUsername(storedUsername);
-    }
-  }, []);
+  // Transform user assessments into chart data
+  const riskHistoryData = userAssessments.map((a) => ({
+    date: new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    risk: a.risk_score,
+  })).reverse();
+
+  // Transform metrics into chart data
+  const cholesterolHistoryData = cholesterolMetrics.map(m => ({
+    date: new Date(m.recorded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    value: m.value
+  })).reverse();
+
+  const bpHistoryData = useMemo(() => {
+    // Group systolic and diastolic by date
+    const history: Record<string, { date: string; systolic: number; diastolic: number }> = {};
+    
+    systolicMetrics.forEach(m => {
+      const d = new Date(m.recorded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      if (!history[d]) history[d] = { date: d, systolic: 0, diastolic: 0 };
+      history[d].systolic = m.value;
+    });
+
+    diastolicMetrics.forEach(m => {
+      const d = new Date(m.recorded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      if (!history[d]) history[d] = { date: d, systolic: 0, diastolic: 0 };
+      history[d].diastolic = m.value;
+    });
+
+    return Object.values(history).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [systolicMetrics, diastolicMetrics]);
+
+  // Calculate stats from real data
+  const totalAssessments = userAssessments.length;
+  const firstRisk = userAssessments[userAssessments.length - 1]?.risk_score || 0;
+  const latestRisk = userAssessments[0]?.risk_score || 0;
+  const riskChange = firstRisk > 0 ? Math.round(latestRisk - firstRisk) : 0;
 
   const handleLogout = () => {
-    localStorage.removeItem("username");
-    localStorage.removeItem("userEmail");
-    router.push("/login");
+    logout();
   };
 
   return (
@@ -175,7 +174,7 @@ export default function HistoryPage() {
         >
           <div>
             <h1 className="text-white font-semibold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-              {username ? `PATIENT: ${username.toUpperCase()}` : "PATIENT: USER"} <span className="text-cyan-400 ml-1">+</span>
+              {user?.name ? `PATIENT: ${user.name.toUpperCase()}` : "PATIENT: USER"} <span className="text-cyan-400 ml-1">+</span>
             </h1>
             <p className="text-slate-500 text-xs">Historical analytics</p>
           </div>
@@ -209,10 +208,14 @@ export default function HistoryPage() {
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-slate-500 text-xs">Risk Score Change</span>
-                  <TrendingDown className="w-4 h-4 text-green-400" />
+                  {riskChange <= 0 ? (
+                    <TrendingDown className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <TrendingUp className="w-4 h-4 text-red-400" />
+                  )}
                 </div>
-                <p className="text-3xl font-bold text-green-400" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                  -15%
+                <p className={`text-3xl font-bold ${riskChange <= 0 ? "text-green-400" : "text-red-400"}`} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                  {riskChange <= 0 ? riskChange : `+${riskChange}`}%
                 </p>
                 <p className="text-xs text-slate-600 mt-1">Since first assessment</p>
               </motion.div>
@@ -224,13 +227,13 @@ export default function HistoryPage() {
                 className="bg-[#111827] border border-cyan-500/10 rounded-lg p-5"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-slate-500 text-xs">Cholesterol Change</span>
-                  <TrendingDown className="w-4 h-4 text-green-400" />
+                  <span className="text-slate-500 text-xs">Latest Risk Score</span>
+                  <TrendingDown className="w-4 h-4 text-cyan-400" />
                 </div>
-                <p className="text-3xl font-bold text-green-400" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                  -32 mg/dL
+                <p className="text-3xl font-bold text-cyan-400" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                  {latestRisk}%
                 </p>
-                <p className="text-xs text-slate-600 mt-1">From 230 to 198</p>
+                <p className="text-xs text-slate-600 mt-1">Current assessment</p>
               </motion.div>
 
               <motion.div
@@ -244,9 +247,9 @@ export default function HistoryPage() {
                   <TrendingUp className="w-4 h-4 text-cyan-400" />
                 </div>
                 <p className="text-3xl font-bold text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                  6
+                  {totalAssessments}
                 </p>
-                <p className="text-xs text-slate-600 mt-1">In the past 6 months</p>
+                <p className="text-xs text-slate-600 mt-1">All time</p>
               </motion.div>
             </div>
             
@@ -362,39 +365,59 @@ export default function HistoryPage() {
             
             <DataPanel title="Assessment history" className="col-span-12" delay={0.3}>
               <div className="space-y-2">
-                {assessments.map((assessment, i) => (
-                  <motion.div
-                    key={assessment.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.35 + i * 0.03 }}
-                    className="flex items-center justify-between p-3 bg-[#0a0f1a] rounded-lg hover:bg-[#0f1520] transition-colors cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-[#111827] flex items-center justify-center">
-                        <Calendar className="w-4 h-4 text-slate-500" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-white">{assessment.date}</p>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                          <span>Cholesterol: {assessment.cholesterol}</span>
-                          <span>BP: {assessment.bp}</span>
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                  </div>
+                ) : userAssessments.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-slate-500">No assessments yet</p>
+                    <Link href="/assessment" className="text-cyan-400 text-sm hover:underline mt-2 inline-block">
+                      Take your first assessment
+                    </Link>
+                  </div>
+                ) : (
+                  userAssessments.map((assessment, i) => (
+                    <motion.div
+                      key={assessment.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.35 + i * 0.03 }}
+                      className="flex items-center justify-between p-3 bg-[#0a0f1a] rounded-lg hover:bg-[#0f1520] transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-lg bg-[#111827] flex items-center justify-center">
+                          <Calendar className="w-4 h-4 text-slate-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-white">
+                            {new Date(assessment.created_at).toLocaleDateString("en-US", { 
+                              month: "long", 
+                              day: "numeric", 
+                              year: "numeric" 
+                            })}
+                          </p>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                            <span>Type: {assessment.disease_type}</span>
+                            <span>Level: {assessment.risk_level}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className={`text-xl font-bold ${
-                          assessment.status === "low" ? "text-green-400" : "text-amber-400"
-                        }`} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                          {assessment.riskScore}%
-                        </p>
-                        <p className="text-xs text-slate-600">Risk Score</p>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <p className={`text-xl font-bold ${
+                            assessment.risk_level === "low" ? "text-green-400" : 
+                            assessment.risk_level === "moderate" ? "text-amber-400" : "text-red-400"
+                          }`} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                            {Math.round(assessment.risk_score)}%
+                          </p>
+                          <p className="text-xs text-slate-600">Risk Score</p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 transition-colors" />
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                    </div>
-                  </motion.div>
-                ))}
+                    </motion.div>
+                  ))
+                )}
               </div>
             </DataPanel>
           </div>

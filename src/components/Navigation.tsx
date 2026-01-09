@@ -17,6 +17,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useCommand } from "@/context/CommandContext";
 
 const sidebarItems = [
   { icon: List, label: "Overview", href: "/" },
@@ -94,6 +95,8 @@ export function Sidebar() {
 }
 
 export function Header({ title, subtitle }: { title: string; subtitle: string }) {
+  const { toggle } = useCommand();
+
   return (
     <header className="h-20 border-b border-white/5 flex items-center justify-between px-10 bg-[#030712]/40 backdrop-blur-md sticky top-0 z-40">
       <div>
@@ -104,14 +107,16 @@ export function Header({ title, subtitle }: { title: string; subtitle: string })
       </div>
       
       <div className="flex items-center gap-8">
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-cyan-400 transition-colors" />
-          <input
-            type="text"
-            placeholder="SEARCH RECORDS..."
-            className="w-64 h-10 pl-10 pr-4 bg-slate-900/50 border border-white/5 rounded-xl text-xs font-medium text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/30 focus:bg-slate-900 transition-all"
-          />
-        </div>
+        <button 
+          onClick={toggle}
+          className="relative group flex items-center"
+        >
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+          <div className="w-64 h-10 pl-10 pr-4 bg-slate-900/50 border border-white/5 rounded-xl text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between group-hover:border-cyan-500/30 group-hover:bg-slate-900 transition-all">
+            <span>Search Commands...</span>
+            <span className="text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded border border-white/5">⌘K</span>
+          </div>
+        </button>
         <div className="h-8 w-px bg-white/5" />
         <div className="text-right">
           <p className="text-slate-500 text-[10px] font-bold uppercase tracking-tighter">Reference ID</p>

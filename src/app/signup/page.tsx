@@ -2,16 +2,19 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Heart, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User } from "lucide-react";
+import { Heart, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Calendar, Users } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [gender, setGender] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -27,11 +30,32 @@ export default function SignupPage() {
       return;
     }
 
+    if (!dateOfBirth) {
+      setError("Please enter your date of birth");
+      return;
+    }
+
+    if (!gender) {
+      setError("Please select your gender");
+      return;
+    }
+
     setIsLoading(true);
 
     const result = await signup(name, email, password);
 
     if (result.success) {
+      // Save additional user data (date_of_birth, gender) to users table
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from("users").upsert({
+          id: user.id,
+          email: user.email,
+          name: name,
+          date_of_birth: dateOfBirth,
+          gender: gender,
+        });
+      }
       router.push("/");
     } else {
       setError(result.error || "Signup failed");
@@ -89,6 +113,43 @@ export default function SignupPage() {
                     className="w-full bg-slate-900/50 border border-white/5 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/30 focus:ring-1 focus:ring-cyan-500/20 transition-all"
                     required
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                    Date of Birth
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                    <input
+                      type="date"
+                      value={dateOfBirth}
+                      onChange={(e) => setDateOfBirth(e.target.value)}
+                      className="w-full bg-slate-900/50 border border-white/5 rounded-xl pl-12 pr-4 py-3.5 text-white focus:outline-none focus:border-cyan-500/30 focus:ring-1 focus:ring-cyan-500/20 transition-all [color-scheme:dark]"
+                      required
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                    Gender
+                  </label>
+                  <div className="relative">
+                    <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                    <select
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value)}
+                      className="w-full bg-slate-900/50 border border-white/5 rounded-xl pl-12 pr-4 py-3.5 text-white focus:outline-none focus:border-cyan-500/30 focus:ring-1 focus:ring-cyan-500/20 transition-all appearance-none"
+                      required
+                    >
+                      <option value="" className="bg-slate-900">Select...</option>
+                      <option value="Male" className="bg-slate-900">Male</option>
+                      <option value="Female" className="bg-slate-900">Female</option>
+                      <option value="Other" className="bg-slate-900">Other</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 

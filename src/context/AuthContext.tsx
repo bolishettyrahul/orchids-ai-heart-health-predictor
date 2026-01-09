@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 interface User {
   id: string;
@@ -32,11 +33,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Check for existing session on mount
   useEffect(() => {
-    const checkAuth = () => {
+    const checkAuth = async () => {
       try {
-        const savedUser = localStorage.getItem("cardioai_user");
-        if (savedUser) {
-          setUser(JSON.parse(savedUser));
+        // Check Supabase session
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          setUser({
+            id: session.user.id,
+            email: session.user.email || "",
+            name: session.user.user_metadata?.name || session.user.email?.split("@")[0] || "",
+            avatar: session.user.user_metadata?.avatar_url,
+          });
+        } else {
+          // Fallback to localStorage for demo purposes
+          const savedUser = localStorage.getItem("cardioai_user");
+          if (savedUser) {
+            setUser(JSON.parse(savedUser));
+          }
         }
       } catch (error) {
         console.error("Auth check error:", error);
@@ -46,6 +60,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     checkAuth();
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser({
+          id: session.user.id,
+          email: session.user.email || "",
+          name: session.user.user_metadata?.name || session.user.email?.split("@")[0] || "",
+          avatar: session.user.user_metadata?.avatar_url,
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // Redirect logic
@@ -65,29 +95,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Demo validation - in production, this would be a real API call
       if (!email || !password) {
         return { success: false, error: "Email and password are required" };
       }
 
-      if (password.length < 6) {
-        return { success: false, error: "Invalid credentials" };
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
       }
 
-      // Create user session
-      const newUser: User = {
-        id: crypto.randomUUID(),
-        email,
-        name: email.split("@")[0],
-      };
+      if (data.user) {
+        const newUser: User = {
+          id: data.user.id,
+          email: data.user.email || "",
+          name: data.user.user_metadata?.name || email.split("@")[0],
+        };
+        setUser(newUser);
+        localStorage.setItem("cardioai_user", JSON.stringify(newUser));
+        return { success: true };
+      }
 
-      localStorage.setItem("cardioai_user", JSON.stringify(newUser));
-      setUser(newUser);
-
-      return { success: true };
+      return { success: false, error: "Login failed" };
     } catch (error) {
       return { success: false, error: "An error occurred during login" };
     }
@@ -95,10 +127,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (name: string, email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Demo validation
       if (!name || !email || !password) {
         return { success: false, error: "All fields are required" };
       }
@@ -111,24 +139,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: "Please enter a valid email" };
       }
 
-      // Create user session
-      const newUser: User = {
-        id: crypto.randomUUID(),
+      const { data, error } = await supabase.auth.signUp({
         email,
-        name,
-      };
+        password,
+        options: {
+          data: {
+            name,
+          },
+        },
+      });
 
-      localStorage.setItem("cardioai_user", JSON.stringify(newUser));
-      setUser(newUser);
+      if (error) {
+        return { success: false, error: error.message };
+      }
 
-      return { success: true };
+      if (data.user) {
+        const newUser: User = {
+          id: data.user.id,
+          email: data.user.email || "",
+          name,
+        };
+        setUser(newUser);
+        localStorage.setItem("cardioai_user", JSON.stringify(newUser));
+        return { success: true };
+      }
+
+      return { success: false, error: "Signup failed" };
     } catch (error) {
       return { success: false, error: "An error occurred during signup" };
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     localStorage.removeItem("cardioai_user");
+    localStorage.removeItem("lastAssessment");
+    localStorage.removeItem("diseaseRisks");
+    localStorage.removeItem("username");
+    localStorage.removeItem("userEmail");
     setUser(null);
     router.push("/login");
   };
